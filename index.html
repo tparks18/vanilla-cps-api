@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CPS School Live Search</title>
+  <!-- Bulma CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <style>
+    /* Suggestions box styling */
+    #suggestions {
+      border: 1px solid #dbdbdb;
+      border-radius: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+      position: absolute;
+      width: 100%;
+      background: white;
+      z-index: 10;
+      display: none;
+    }
+    .suggestion-item {
+      padding: 8px;
+      cursor: pointer;
+    }
+    .suggestion-item:hover {
+      background-color: #f0f0f0;
+    }
+    /* Add some margin below the suggestions box */
+    #suggestions + .button {
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <section class="section">
+    <div class="container">
+      <h1 class="title">CPS School Live Search</h1>
+      <!-- Search Field and Button -->
+      <div class="field has-addons">
+        <div class="control is-expanded" style="position: relative;">
+          <input class="input" type="text" id="searchBox" placeholder="Type school name...">
+          <!-- Suggestions will appear here -->
+          <div id="suggestions" class="box"></div>
+        </div>
+        <div class="control">
+          <button class="button is-info" id="searchBtn">Search</button>
+        </div>
+      </div>
+      
+      <!-- Clear and Copy Buttons -->
+      <div class="buttons">
+        <button class="button is-light" id="clearBtn">Clear</button>
+        <button class="button is-light" id="copyBtn">Copy Table</button>
+      </div>
+
+      <!-- Table Container -->
+      <div id="tableContainer"></div>
+    </div>
+  </section>
+
+  <script>
+    // API endpoints
+    const ALL_SCHOOLS_URL = "https://api.cps.edu/schoolprofile/CPS/AllSchoolProfiles";
+    const SINGLE_SCHOOL_URL = "https://api.cps.edu/schoolprofile/CPS/SingleSchoolProfile?SchoolID=";
+
+    // Global variables to store the fetched data
+    let allSchools = [];
+    // Simulated chronic absenteeism data (if not available, these will default to "N/A")
+    let chronicData = {};  // For demonstration, we assume no chronic data exists.
+
+    // Fetch the full list of schools when the page loads
+    function fetchAllSchools() {
+      fetch(ALL_SCHOOLS_URL)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("Network response was not ok.");
+          }
+          return response.json();
+        })
+        .then(data => {
+          allSchools = data;
+          console.log("Fetched all schools:", allSchools.length);
+        })
+        .catch(error => {
+          console.error("Error fetching all schools:", error);
+        });
+    }
+
+    // Process the school data similarly to your Python cps_profile_to_json function
+    function processSchoolData(data) {
+      let school_id = data.SchoolID ? String(data.SchoolID) : "N/A";
+      let school_long_name = data.SchoolLongName || "N/A";
+      let total_students = parseInt(data.StudentCount) || 1;
+
+      // Special Populations
+      let low_income_count = parseInt(data.StudentCountLowIncome) || 0;
+      let special_ed_count = parseInt(data.StudentCountSpecialEducation) || 0;
+      let limited_english_count = parseInt(data.StudentCountLimitedEnglishLearners) || 0;
+
+      let LowIncomePercent = Math.round((low_income_count / total_students) * 1000) / 10;
+      let DiverseLearnersPercent = Math.round((special_ed_count / total_students) * 1000) / 10;
+      let LimitedEnglishLearnersPercent = Math.round((limited_english_count / total_students) * 1000) / 10;
+
+      // Demographics
+      let asian_count = parseInt(data.StudentCountAsian) || 0;
+      let black_count = parseInt(data.StudentCountBlack) || 0;
+      let hispanic_count = parseInt(data.StudentCountHispanic) || 0;
+      let white_count = parseInt(data.StudentCountWhite) || 0;
+      let asian_pct = Math.round((asian_count / total_students) * 1000) / 10;
+      let black_pct = Math.round((black_count / total_students) * 1000) / 10;
+      let hispanic_pct = Math.round((hispanic_count / total_students) * 1000) / 10;
+      let white_pct = Math.round((white_count / total_students) * 1000) / 10;
+      let other_pct = Math.round((100 - (asian_pct + black_pct + hispanic_pct + white_pct)) * 10) / 10;
+
+      let demographics = {
+        "Asian": asian_pct,
+        "Black": black_pct,
+        "Hispanic": hispanic_pct,
+        "White": white_pct,
+        "Other": other_pct
+      };
+
+      let address_street = data.AddressStreet || "";
+      let address_city = data.AddressCity || "Chicago";
+      let address_state = data.AddressState || "IL";
+      let address_zip = data.AddressZipCode || "";
+      let full_address = `${address_street} ${address_city} ${address_state} ${address_zip}`.trim();
+
+      // Gather Assistant Principals from additional fields
+      let ap_list = [];
+      const idx_words = ["Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh"];
+      idx_words.forEach(word => {
+        let name_key = `${word}ContactFullName`;
+        let title_key = `${word}ContactTitle`;
+        let contact_name = data[name_key] || "";
+        let contact_title = data[title_key] || "";
+        if (contact_title.includes("Assistant Principal")) {
+          ap_list.push(contact_name);
+        }
+      });
+      if (ap_list.length === 0) {
+        ap_list = ["None"];
+      }
+
+      // Build the processed result object
+      let result = {
+        "SchoolID": school_id,
+        "SchoolLongName": school_long_name,
+        "AdministratorFullName": data.AdministratorFullName || "N/A",
+        "AssistantPrincipals": ap_list,
+        "StudentCount": total_students,
+        "WebsiteURL": data.WebsiteURL || "N/A",
+        "Community": data.Community || "N/A",
+        "GradesOffered": data.GradesOfferedReadable || "N/A",
+        "Network": data.GeographicNetwork || "N/A",
+        "CultureRating": data.CultureRating || "N/A",
+        "StatisticsSummary": data.StatisticsSummary || "N/A",
+        "Demographics": demographics,
+        "AddressStreet": address_street || "N/A",
+        "AddressCity": address_city || "N/A",
+        "AddressState": address_state || "N/A",
+        "AddressZipCode": address_zip || "N/A",
+        "LowIncomePercent": LowIncomePercent,
+        "DiverseLearnersPercent": DiverseLearnersPercent,
+        "LimitedEnglishLearnersPercent": LimitedEnglishLearnersPercent,
+        "Introduction": data.Introduction || "N/A"
+      };
+
+      // Merge chronic absenteeism data if available; otherwise, set to "N/A"
+      if (chronicData[school_id]) {
+        let ca = chronicData[school_id];
+        result["CA2020"] = ca["2020"];
+        result["CA2021"] = ca["2021"];
+        result["CA2022"] = ca["2022"];
+        result["CA2023"] = ca["2023"];
+        result["CA2024"] = ca["2024"];
+      } else {
+        result["CA2020"] = "N/A";
+        result["CA2021"] = "N/A";
+        result["CA2022"] = "N/A";
+        result["CA2023"] = "N/A";
+        result["CA2024"] = "N/A";
+      }
+
+      return result;
+    }
+
+    // Render a Bulma-styled table using the processed school data
+    function renderTable(data) {
+      let tableHtml = `
+        <table class="table is-bordered is-striped is-hoverable is-fullwidth" id="dataTable">
+          <tbody>
+            <tr><th>School ID</th><td>${data.SchoolID}</td></tr>
+            <tr><th>School Name</th><td>${data.SchoolLongName}</td></tr>
+            <tr><th>Administrator</th><td>${data.AdministratorFullName}</td></tr>
+            <tr><th>Assistant Principals</th><td>${data.AssistantPrincipals.join(", ")}</td></tr>
+            <tr><th>Student Count</th><td>${data.StudentCount}</td></tr>
+            <tr><th>Website</th><td>${data.WebsiteURL}</td></tr>
+            <tr><th>Community</th><td>${data.Community}</td></tr>
+            <tr><th>Grades Offered</th><td>${data.GradesOffered}</td></tr>
+            <tr><th>Network</th><td>${data.Network}</td></tr>
+            <tr><th>Culture Rating</th><td>${data.CultureRating}</td></tr>
+            <tr><th>Statistics Summary</th><td>${data.StatisticsSummary}</td></tr>
+            <tr>
+              <th>Demographics</th>
+              <td>
+                Asian: ${data.Demographics.Asian}%,
+                Black: ${data.Demographics.Black}%,
+                Hispanic: ${data.Demographics.Hispanic}%,
+                White: ${data.Demographics.White}%,
+                Other: ${data.Demographics.Other}%
+              </td>
+            </tr>
+            <tr>
+              <th>Address</th>
+              <td>${data.AddressStreet}, ${data.AddressCity}, ${data.AddressState} ${data.AddressZipCode}</td>
+            </tr>
+            <tr><th>Low Income %</th><td>${data.LowIncomePercent}%</td></tr>
+            <tr><th>Diverse Learners %</th><td>${data.DiverseLearnersPercent}%</td></tr>
+            <tr><th>Limited English Learners %</th><td>${data.LimitedEnglishLearnersPercent}%</td></tr>
+            <tr><th>Introduction</th><td>${data.Introduction}</td></tr>
+            <tr><th>CA 2020</th><td>${data.CA2020}</td></tr>
+            <tr><th>CA 2021</th><td>${data.CA2021}</td></tr>
+            <tr><th>CA 2022</th><td>${data.CA2022}</td></tr>
+            <tr><th>CA 2023</th><td>${data.CA2023}</td></tr>
+            <tr><th>CA 2024</th><td>${data.CA2024}</td></tr>
+          </tbody>
+        </table>
+      `;
+      document.getElementById("tableContainer").innerHTML = tableHtml;
+    }
+
+    // Clear the search input, suggestions, and table
+    function clearData() {
+      document.getElementById("searchBox").value = "";
+      document.getElementById("tableContainer").innerHTML = "";
+      document.getElementById("suggestions").style.display = "none";
+      document.getElementById("suggestions").innerHTML = "";
+    }
+
+    // Copy the table HTML to clipboard
+    function copyTable() {
+      let table = document.getElementById("dataTable");
+      if (!table) {
+        alert("No table to copy!");
+        return;
+      }
+      let range = document.createRange();
+      range.selectNode(table);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        document.execCommand("copy");
+        alert("Table copied to clipboard!");
+      } catch (err) {
+        alert("Failed to copy table.");
+      }
+      window.getSelection().removeAllRanges();
+    }
+
+    // Search function: filter schools based on the search input
+    function performSearch() {
+      const query = document.getElementById("searchBox").value.toLowerCase();
+      if (query.length < 2) {
+        document.getElementById("suggestions").style.display = "none";
+        return;
+      }
+      const results = allSchools.filter(school =>
+        school.SchoolLongName && school.SchoolLongName.toLowerCase().includes(query)
+      );
+      displaySuggestions(results);
+    }
+
+    // Display the list of matching school suggestions
+    function displaySuggestions(suggestions) {
+      const suggestionsContainer = document.getElementById("suggestions");
+      if (suggestions.length === 0) {
+        suggestionsContainer.style.display = "none";
+        return;
+      }
+      let html = "";
+      suggestions.forEach(school => {
+        html += `<div class="suggestion-item" data-id="${school.SchoolID}">${school.SchoolLongName}</div>`;
+      });
+      suggestionsContainer.innerHTML = html;
+      suggestionsContainer.style.display = "block";
+    }
+
+    // When a suggestion is clicked, fetch that school’s details
+    document.getElementById("suggestions").addEventListener("click", function(e) {
+      if (e.target && e.target.matches(".suggestion-item")) {
+        const schoolId = e.target.getAttribute("data-id");
+        document.getElementById("searchBox").value = e.target.textContent;
+        document.getElementById("suggestions").style.display = "none";
+        fetchSchoolDetails(schoolId);
+      }
+    });
+
+    // Fetch details for a single school by ID
+    function fetchSchoolDetails(schoolId) {
+      fetch(SINGLE_SCHOOL_URL + schoolId)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("Network response was not ok.");
+          }
+          return response.json();
+        })
+        .then(data => {
+          const processedData = processSchoolData(data);
+          renderTable(processedData);
+        })
+        .catch(error => {
+          console.error("Error fetching school details:", error);
+        });
+    }
+
+    // Attach event listeners to the buttons
+    document.getElementById("searchBtn").addEventListener("click", performSearch);
+    document.getElementById("clearBtn").addEventListener("click", clearData);
+    document.getElementById("copyBtn").addEventListener("click", copyTable);
+
+    // On page load, fetch all schools
+    document.addEventListener("DOMContentLoaded", fetchAllSchools);
+  </script>
+</body>
+</html>
