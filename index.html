@@ -7,7 +7,7 @@
   <!-- Bulma CSS -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
   <style>
-    /* Set the global font to Calibri */
+    /* Global styling */
     body, table, h1, h2, p, input, button {
       font-family: Calibri, sans-serif;
     }
@@ -31,19 +31,18 @@
       background-color: #f0f0f0;
     }
   </style>
+  <!-- Include SheetJS Library for parsing Excel files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <section class="section">
     <div class="container">
-      <!-- Title and Help Note -->
       <h1 class="title">CPS School Live Search</h1>
       <p class="help">Type two letters to see suggestions</p>
       
-      <!-- Search Field with Suggestions Dropdown -->
       <div class="field has-addons">
         <div class="control is-expanded" style="position: relative;">
           <input class="input" type="text" id="searchBox" placeholder="Type school name..." autocomplete="off">
-          <!-- Suggestions will be injected here -->
           <div id="suggestions" class="box"></div>
         </div>
         <div class="control">
@@ -51,26 +50,31 @@
         </div>
       </div>
       
-      <!-- Clear and Copy Buttons -->
       <div class="buttons">
         <button class="button is-light" id="clearBtn">Clear</button>
         <button class="button is-light" id="copyBtn">Copy Table</button>
       </div>
-
-      <!-- Container for the Data Table -->
+      
       <div id="tableContainer"></div>
     </div>
   </section>
 
   <script>
-    // CPS API endpoints
+    // API endpoints
     const ALL_SCHOOLS_URL = "https://api.cps.edu/schoolprofile/CPS/AllSchoolProfiles";
     const SINGLE_SCHOOL_URL = "https://api.cps.edu/schoolprofile/CPS/SingleSchoolProfile?SchoolID=";
-
-    // Global variable for storing the list of schools
+    
+    // Global variables for schools and spreadsheet data maps
     let allSchools = [];
+    let chronicDataMap = {};
+    let additionalDataMap = {};
 
-    // Fetch the complete list of schools from the CPS API.
+    // Helper function to round numbers to 1 decimal place
+    function roundTo1Decimal(num) {
+      return Math.round(num * 10) / 10;
+    }
+
+    // Load the complete list of schools from the API.
     function fetchAllSchools() {
       fetch(ALL_SCHOOLS_URL)
         .then(response => {
@@ -88,8 +92,7 @@
         });
     }
 
-    // Process the raw school data into a formatted object.
-    // "Administrator" is renamed to "Principal", and a short name is included if available.
+    // Process API school data.
     function processSchoolData(data) {
       let school_id = data.SchoolID ? String(data.SchoolID) : "N/A";
       let school_long_name = data.SchoolLongName || "N/A";
@@ -126,9 +129,8 @@
       let address_city = data.AddressCity || "Chicago";
       let address_state = data.AddressState || "IL";
       let address_zip = data.AddressZipCode || "";
-      let full_address = `${address_street} ${address_city} ${address_state} ${address_zip}`.trim();
-
-      // Gather assistant principals. If none, default to "None".
+      
+      // Gather assistant principals.
       let ap_list = [];
       const idx_words = ["Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh"];
       idx_words.forEach(word => {
@@ -144,7 +146,6 @@
         ap_list = ["None"];
       }
 
-      // Build the processed result object.
       return {
         "SchoolID": school_id,
         "SchoolLongName": school_long_name,
@@ -155,7 +156,8 @@
         "WebsiteURL": data.WebsiteURL || "N/A",
         "Community": data.Community || "N/A",
         "GradesOffered": data.GradesOfferedReadable || "N/A",
-        "Network": data.GeographicNetwork || "N/A",
+        // API's network is commented out so that additional data is used:
+        // "Network": data.GeographicNetwork || "N/A",
         "CultureRating": data.CultureRating || "N/A",
         "StatisticsSummary": data.StatisticsSummary || "N/A",
         "Demographics": demographics,
@@ -166,22 +168,51 @@
         "LowIncomePercent": LowIncomePercent,
         "DiverseLearnersPercent": DiverseLearnersPercent,
         "LimitedEnglishLearnersPercent": LimitedEnglishLearnersPercent,
-        "Introduction": data.Introduction || `
-          Oscar Mayer Magnet offers Montessori in grades Pre-K through 3rd grade. Pre-K is a full day program for 4 year olds.
-          
-          Our intermediate program serves students in grades 4th-5th. Our goal in the Intermediate Level is to best support all students in the stage between elementary and middle school. We believe our program will provide a comprehensive curriculum, maximum instructional time and unique opportunities for our students. We try to blend the Montessori and IB programs in our classes. At this level, students begin to travel to departmental classes. These classes include writing, science and humanities.
-          
-          Lastly, we offer the International Baccalaureate (IB) Middle Years Programme (MYP) in Grades 6-8. The International Baccalaureate Middle Years Program (IB MYP) is an internationally recognized education program designed to challenge students to develop the knowledge and skills necessary to participate as active and responsible citizens in a changing world.
-          
-          All students benefit from taking Music, Art, Spanish, Library, and Physical Education.
-        `
+        "Introduction": data.Introduction || "N/A"
       };
     }
 
-    // Render the processed data in a Bulma-styled table.
-    // The full school name is displayed as a header above the table.
-    // Introduction and Address are at the top, followed by a row for the Short Name.
-    // The Website field is rendered as a clickable link.
+    // Merge spreadsheet data into the API data.
+    function mergeSchoolData(apiData, chronicData, additionalData) {
+      let schoolId = String(apiData.SchoolID);
+
+      // Merge chronic absenteeism data
+      if (chronicData.hasOwnProperty(schoolId)) {
+        let ca = chronicData[schoolId];
+        apiData.CA2020 = ca["2020"];
+        apiData.CA2021 = ca["2021"];
+        apiData.CA2022 = ca["2022"];
+        apiData.CA2023 = ca["2023"];
+        apiData.CA2024 = ca["2024"];
+      } else {
+        apiData.CA2020 = "N/A";
+        apiData.CA2021 = "N/A";
+        apiData.CA2022 = "N/A";
+        apiData.CA2023 = "N/A";
+        apiData.CA2024 = "N/A";
+      }
+      
+      // Merge additional data
+      if (additionalData.hasOwnProperty(schoolId)) {
+        Object.assign(apiData, additionalData[schoolId]);
+        if (!apiData.Network) {
+          apiData.Network = "N/A";
+        }
+      } else {
+        apiData.TransferRateNetwork = "N/A";
+        apiData.NetworkChief = "N/A";
+        apiData.EffectiveLeadersScore = "N/A";
+        apiData.EffectiveLeadersRating = "N/A";
+        apiData.ESBSubdist = "N/A";
+        apiData.ESBDist = "N/A";
+        apiData.CBOERepresentative = "N/A";
+        apiData.OpportunityIndex = "N/A";
+        apiData.Network = "N/A";
+      }
+      return apiData;
+    }
+
+    // Render the processed data in a table.
     function renderTable(data) {
       const headerHtml = `<h2 class="title is-4">${data.SchoolLongName}</h2>`;
       const tableHtml = `
@@ -191,14 +222,24 @@
             <tr><th>Short Name</th><td>${data.SchoolShortName}</td></tr>
             <tr><th>Principal</th><td>${data.Principal}</td></tr>
             <tr><th>Assistant Principals</th><td>${data.AssistantPrincipals.join(", ")}</td></tr>
-            <tr><th>Introduction</th><td>${data.Introduction.replace(/<[^>]*>/g, '').trim()}</td></tr>
+            <tr><th>Introduction</th><td>${data.Introduction}</td></tr>
             <tr><th>Address</th><td>${data.AddressStreet}, ${data.AddressCity}, ${data.AddressState} ${data.AddressZipCode}</td></tr>
             <tr><th>Community</th><td>${data.Community}</td></tr>
             <tr><th>Student Count</th><td>${data.StudentCount}</td></tr>
             <tr><th>Website</th><td><a href="${data.WebsiteURL}" target="_blank">${data.WebsiteURL}</a></td></tr>
             <tr><th>Grades Offered</th><td>${data.GradesOffered}</td></tr>
+            <!-- Network now comes from the additional spreadsheet -->
             <tr><th>Network</th><td>${data.Network}</td></tr>
+            <tr><th>Network Chief</th><td>${data.NetworkChief}</td></tr>
             <tr><th>Culture Rating</th><td>${data.CultureRating}</td></tr>
+            <tr><th colspan="2" class="has-text-centered">Additional Metrics</th></tr>
+            <tr><th>Transfer Rate</th><td>${data.TransferRateNetwork}%</td></tr>
+            <tr><th>Effective Leaders Score</th><td>${data.EffectiveLeadersScore}</td></tr>
+            <tr><th>Effective Leaders Rating</th><td>${data.EffectiveLeadersRating}</td></tr>
+            <tr><th>ESB Subdist</th><td>${data.ESBSubdist}</td></tr>
+            <tr><th>ESB Dist</th><td>${data.ESBDist}</td></tr>
+            <tr><th>CBOE Representative</th><td>${data.CBOERepresentative}</td></tr>
+            <tr><th>Opportunity Index</th><td>${data.OpportunityIndex}</td></tr>
             <tr><th colspan="2" class="has-text-centered">Demographics</th></tr>
             <tr><th>Statistics Summary</th><td>${data.StatisticsSummary}</td></tr>
             <tr><th>Asian</th><td>${data.Demographics.Asian}%</td></tr>
@@ -209,13 +250,19 @@
             <tr><th>Low Income %</th><td>${data.LowIncomePercent}%</td></tr>
             <tr><th>Diverse Learners %</th><td>${data.DiverseLearnersPercent}%</td></tr>
             <tr><th>Limited English Learners %</th><td>${data.LimitedEnglishLearnersPercent}%</td></tr>
+            <tr><th colspan="2" class="has-text-centered">Chronic Absenteeism</th></tr>
+            <tr><th>2020</th><td>${data.CA2020}%</td></tr>
+            <tr><th>2021</th><td>${data.CA2021}%</td></tr>
+            <tr><th>2022</th><td>${data.CA2022}%</td></tr>
+            <tr><th>2023</th><td>${data.CA2023}%</td></tr>
+            <tr><th>2024</th><td>${data.CA2024}%</td></tr>
           </tbody>
         </table>
       `;
       document.getElementById("tableContainer").innerHTML = headerHtml + tableHtml;
     }
 
-    // Clear the search input, suggestions, and table contents.
+    // Clear the search input, suggestions, and table.
     function clearData() {
       document.getElementById("searchBox").value = "";
       document.getElementById("tableContainer").innerHTML = "";
@@ -223,7 +270,7 @@
       document.getElementById("suggestions").innerHTML = "";
     }
 
-    // Copy the rendered table to the clipboard.
+    // Copy table contents to clipboard.
     function copyTable() {
       let table = document.getElementById("dataTable");
       if (!table) {
@@ -243,7 +290,7 @@
       window.getSelection().removeAllRanges();
     }
 
-    // Perform search: filter schools based on the search input value.
+    // Display suggestions as the user types.
     function performSearch() {
       const query = document.getElementById("searchBox").value.toLowerCase();
       if (query.length < 2) {
@@ -256,7 +303,7 @@
       displaySuggestions(results);
     }
 
-    // Display matching school suggestions as the user types.
+    // Render suggestion items.
     function displaySuggestions(suggestions) {
       const suggestionsContainer = document.getElementById("suggestions");
       if (suggestions.length === 0) {
@@ -281,12 +328,10 @@
       }
     });
 
-    // Add a keyup event to the search box to show suggestions as you type.
-    document.getElementById("searchBox").addEventListener("keyup", function() {
-      performSearch();
-    });
+    // Attach keyup event to search box.
+    document.getElementById("searchBox").addEventListener("keyup", performSearch);
 
-    // Fetch details for a single school by its ID.
+    // Fetch details for a single school, merge spreadsheet data, and render the table.
     function fetchSchoolDetails(schoolId) {
       fetch(SINGLE_SCHOOL_URL + schoolId)
         .then(response => {
@@ -296,7 +341,8 @@
           return response.json();
         })
         .then(data => {
-          const processedData = processSchoolData(data);
+          let processedData = processSchoolData(data);
+          processedData = mergeSchoolData(processedData, chronicDataMap, additionalDataMap);
           renderTable(processedData);
         })
         .catch(error => {
@@ -304,14 +350,77 @@
         });
     }
 
-    // Attach event listeners to the buttons.
-    document.getElementById("searchBtn").addEventListener("click", performSearch);
-    document.getElementById("clearBtn").addEventListener("click", clearData);
-    document.getElementById("copyBtn").addEventListener("click", copyTable);
+    // Load Excel file and parse it into a data map.
+    function loadExcelData(filepath, processor) {
+      return fetch(filepath)
+        .then(response => response.arrayBuffer())
+        .then(data => {
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          let dataMap = {};
+          jsonData.forEach(row => {
+            processor(row, dataMap);
+          });
+          return dataMap;
+        });
+    }
 
-    // On page load, fetch the school list.
-    document.addEventListener("DOMContentLoaded", fetchAllSchools);
+    // Processor for chronic absenteeism data.
+    function processChronicRow(row, map) {
+      let schoolId = String(row["School ID"]);
+      map[schoolId] = {
+        "2020": roundTo1Decimal(row["2020 CA"] * 100),
+        "2021": roundTo1Decimal(row["2021 CA"] * 100),
+        "2022": roundTo1Decimal(row["2022 CA"] * 100),
+        "2023": roundTo1Decimal(row["2023 CA"] * 100),
+        "2024": roundTo1Decimal(row["2024 CA"] * 100)
+      };
+    }
+
+    // Processor for additional data from opportunity-index-and-more-info.xlsx.
+    function processAdditionalRow(row, map) {
+      let schoolId = String(row["School ID"]);
+      // Convert Transfer Rate if it's a numeric value less than 1
+      let transferRate = row["Transfer Rate"];
+      if (typeof transferRate === 'number' && transferRate < 1) {
+        transferRate = roundTo1Decimal(transferRate * 100);
+      }
+      map[schoolId] = {
+        "TransferRateNetwork": transferRate,  // Now shows as e.g. 1.4 for 1.4%
+        "NetworkChief": row["Network Chief"],
+        "EffectiveLeadersScore": row["Effective Leaders Score"],
+        "EffectiveLeadersRating": row["Effective Leaders Rating"],
+        "ESBSubdist": row["ESB Subdist"],
+        "ESBDist": row["ESB Dist"],
+        "CBOERepresentative": row["CBOE Representative"],
+        "OpportunityIndex": row["Opportunity Index"],
+        "Network": row["Network"]  // New property for Network from additional data
+      };
+    }
+
+    // Button event listeners.
+    document.getElementById("copyBtn").addEventListener("click", copyTable);
+    document.getElementById("clearBtn").addEventListener("click", clearData);
+    document.getElementById("searchBtn").addEventListener("click", performSearch);
+
+    // On page load, fetch school list and load spreadsheets.
+    document.addEventListener("DOMContentLoaded", function() {
+      fetchAllSchools();
+      Promise.all([
+        loadExcelData("static/chronic-absenteeism-historical-data.xlsx", processChronicRow),
+        loadExcelData("static/opportunity-index-and-more-info.xlsx", processAdditionalRow)
+      ])
+      .then(results => {
+        chronicDataMap = results[0];
+        additionalDataMap = results[1];
+        console.log("Spreadsheet data loaded", chronicDataMap, additionalDataMap);
+      })
+      .catch(error => {
+        console.error("Error loading spreadsheet data:", error);
+      });
+    });
   </script>
 </body>
 </html>
-
