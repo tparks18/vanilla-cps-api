@@ -69,11 +69,106 @@
     let allSchools = [];
     let chronicDataMap = {};
     let additionalDataMap = {};
+    let footprintData = [];
+
+function processFootprintRow(row) {
+  footprintData.push(row);
+}
 
     // Helper function to round numbers to 1 decimal place
     function roundTo1Decimal(num) {
       return Math.round(num * 10) / 10;
     }
+
+    // Function to get footprint programs by school name
+    function getFootprintProgramsBySchool(schoolName) {
+  const schoolCols = [
+    'school SY19', 'school SY20', 'school SY21',
+    'school SY22', 'school SY23', 'school SY24', 'school SY25'
+  ];
+  const years = ['SY19', 'SY20', 'SY21', 'SY22', 'SY23', 'SY24', 'SY25'];
+
+  const filtered = footprintData.filter(row =>
+    schoolCols.some(col => {
+      const val = row[col];
+      return val && val.toLowerCase().includes(schoolName.toLowerCase());
+    })
+  );
+
+  const participants = {};
+  filtered.forEach(row => {
+    const name = row['name'];
+    if (!name) return;
+
+    if (!participants[name]) {
+      participants[name] = {
+        name,
+        email: row['email'] || 'N/A',
+        programs: {}
+      };
+    }
+
+    years.forEach(year => {
+      const roleKey = `role ${year}`;
+      const yearCols = Object.keys(row).filter(key => key.includes(year) && key !== roleKey && row[key]);
+
+      let text = '';
+      if (row[roleKey]) {
+        text = `Role: ${row[roleKey]}, `;
+      }
+
+      text += yearCols.length ? `Programs: ${yearCols.join(", ")}` : 'No programs';
+      participants[name].programs[year] = text;
+    });
+  });
+
+  return Object.values(participants);
+}
+
+// Render the footprint table with participants and their programs
+    function renderFootprintTable(participants) {
+  if (participants.length === 0) return;
+
+  let html = `
+    <h2 class="title is-4 mt-6">Footprint Participants & Programs</h2>
+    <table class="table is-bordered is-striped is-hoverable is-fullwidth">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>SY19</th>
+          <th>SY20</th>
+          <th>SY21</th>
+          <th>SY22</th>
+          <th>SY23</th>
+          <th>SY24</th>
+          <th>SY25</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  participants.forEach(p => {
+    html += `<tr>
+      <td>${p.name}</td>
+      <td>${p.email}</td>
+      <td>${p.programs.SY19 || 'N/A'}</td>
+      <td>${p.programs.SY20 || 'N/A'}</td>
+      <td>${p.programs.SY21 || 'N/A'}</td>
+      <td>${p.programs.SY22 || 'N/A'}</td>
+      <td>${p.programs.SY23 || 'N/A'}</td>
+      <td>${p.programs.SY24 || 'N/A'}</td>
+      <td>${p.programs.SY25 || 'N/A'}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  document.getElementById("tableContainer").insertAdjacentHTML("beforeend", html);
+}
+
+
+
+
 
     // Load the complete list of schools from the API.
     function fetchAllSchools() {
@@ -345,6 +440,8 @@
           let processedData = processSchoolData(data);
           processedData = mergeSchoolData(processedData, chronicDataMap, additionalDataMap);
           renderTable(processedData);
+          const footprintParticipants = getFootprintProgramsBySchool(processedData.SchoolShortName);
+          renderFootprintTable(footprintParticipants);
         })
         .catch(error => {
           console.error("Error fetching school details:", error);
@@ -411,7 +508,8 @@
       fetchAllSchools();
       Promise.all([
         loadExcelData("static/chronic-absenteeism-historical-data.xlsx", processChronicRow),
-        loadExcelData("static/opportunity-index-and-more-info.xlsx", processAdditionalRow)
+        loadExcelData("static/opportunity-index-and-more-info.xlsx", processAdditionalRow),
+        loadExcelData("static/Footprint_SY2025.xlsx", processFootprintRow)
       ])
       .then(results => {
         chronicDataMap = results[0];
